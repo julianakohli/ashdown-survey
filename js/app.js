@@ -1,0 +1,1012 @@
+// PeatProbe - main controller.
+
+import * as DB from './db.js';
+import * as MapView from './map.js';
+import * as Packs from './packs.js';
+import * as Sync from './sync.js';
+import { QUALITY, PACK, FIREBASE, BASEMAPS } from './config.js';
+import { fmtBytes, fmtDistance } from './geo.js';
+import { INFO_HTML } from './info.js';
+import * as Chart from './chart.js';
+import * as Grid from './grid.js';
+import * as AR from './ar.js';
+import * as Review from './review.js';
+
+// Ordered from least to most consumed; the value is what gets stored, the
+// label is what the surveyor sees and what lands in the CSV.
+// A measurement adopts the nearest sampling node when it is taken within
+// this distance of it (half the 100 m spacing, with a little GPS slack).
+const GRID_ATTACH_M = 60;
+
+const COMBUSTION = {
+  unburned: 'Unburned',
+  light: 'Lightly burned',
+  moderate: 'Moderately burned',
+  near_complete: '(Near) complete',
+};
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+
+const state = {
+  points: [],
+  packs: new Map(),      // fireId -> pack
+  gps: null,             // { lat, lon, accuracy, ts }
+  draft: null,           // { lat, lon, accuracy, manual }
+  photos: [],              // [{blob, url}] - first is required, rest optional
+  listFilter: { text: '', downloadedOnly: false, near: null },
+  photoUrls: new Map(),
+  downloading: new Set(),
+  dlProgress: new Map(),   // fireId -> { name, done, total } for the map pill
+};
+
+// Closing or reloading mid-download silently loses the pack - the browser
+// kills the fetches and nothing is saved. Ask first.
+window.addEventListener('beforeunload', (e) => {
+  if (state.downloading.size) { e.preventDefault(); e.returnValue = ''; }
+});
+
+// ══════════════════════════════════════════════════════════ boot
+async function boot() {
+  $('#info-pane').innerHTML = INFO_HTML;
+  wireTabs();
+  wireForm();
+  wireButtons();
+  wireFireDetail();
+  wireNetwork();
+
+  await refreshPacks();
+
+  try {
+    await MapView.initMap({
+      onFireSelect: handleFireSelect,
+      onManualPlace: handleManualPlace,
+      onFireDetails: openFireDetail,
+      onIndexLoaded: () => renderFireList(),
+    });
+  } catch (err) {
+    toast(err.message, 6000);
+  }
+
+  // After the map exists, so the points layer has somewhere to draw.
+  await refreshPoints();
+  MapView.setPackStates(packStateMap());
+  startGps();
+  updateStorageDisplay();
+  updateSyncPill();
+
+  // The service worker is cache-first, which is right in the field and
+  // maddening in development - it serves yesterday's JavaScript and every
+  // change looks like it did nothing. Skip it on localhost unless you are
+  // deliberately testing offline behaviour (add ?sw=1 for that).
+  const isLocal = ['localhost', '127.0.0.1', ''].includes(location.hostname);
+  const wantSW = !isLocal || new URLSearchParams(location.search).has('sw');
+  if ('serviceWorker' in navigator && wantSW) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  } else if ('serviceWorker' in navigator) {
+    // Clear one left behind by an earlier session, or the stale cache wins.
+    navigator.serviceWorker.getRegistrations()
+      .then(rs => rs.forEach(r => r.unregister())).catch(() => {});
+  }
+
+  // A device that has never persisted is a device that can silently lose a
+  // day's fieldwork. Ask early, while the user is still on wifi.
+  if (await DB.getMeta('askedPersist') !== true) {
+    const ok = await DB.requestPersistence();
+    await DB.setMeta('askedPersist', true);
+    if (!ok) toast('Tip: add PeatProbe to your home screen so your data is not cleared.', 6000);
+  }
+
+  const surveyor = await DB.getMeta('surveyor');
+  if (surveyor) $('#surveyor-input').value = surveyor;
+
+  // Landing back from a redirect sign-in: finish it, then sync whatever was
+  // stuck waiting for exactly this.
+  if (Sync.isEnabled() && navigator.onLine) {
+    Sync.completeRedirect().then((u) => {
+      if (u) {
+        toast(`Signed in${u.email ? ' as ' + u.email : ''}. Syncing…`, 3500);
+        renderAuthLine();
+        doSync({ quiet: true });
+      }
+    }).catch(() => {});
+  }
+
+  // The Review tab exists only for admins - checked once the auth state is
+  // known. The Firestore rules are the real gate; this is just the door.
+  if (Sync.isEnabled() && navigator.onLine) {
+    Sync.isAdminUser().then((ok) => { if (ok) $('#tab-review').hidden = false; })
+      .catch(() => {});
+    renderAuthLine();
+  }
+
+  // AR quadrat is a bonus: the button exists only on phones that can do it.
+  AR.detect().then((m) => { if (m) $('#ar-field').hidden = false; }).catch(() => {});
+}
+
+// ══════════════════════════════════════════════════════════ tabs
+function wireTabs() {
+  $$('.tab').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      $$('.tab').forEach(b => b.classList.toggle('is-active', b === btn));
+      const v = btn.dataset.view;
+      $$('.view').forEach(s => s.classList.toggle('is-active', s.id === `view-${v}`));
+      if (v === 'map') setTimeout(() => MapView.getMap().invalidateSize(), 60);
+      if (v === 'fires') { renderFireList(); updateStorageDisplay(); }
+      if (v === 'data') renderPointList();
+      if (v === 'review') openReviewQueue();
+    });
+  });
+}
+
+const showTab = (v) => $(`.tab[data-view="${v}"]`).click();
+
+// ══════════════════════════════════════════════════════════ packs
+async function refreshPacks() {
+  const list = await DB.allPacks();
+  state.packs = new Map(list.map(p => [p.fireId, p]));
+}
+
+function packStateMap() {
+  const m = new Map();
+  for (const [id, p] of state.packs) m.set(id, Packs.packState(p));
+  return m;
+}
+
+async function handleFireSelect(feature) {
+  const id = feature.properties.id;
+  // Every early exit says why. A silent return after a tap is
+  // indistinguishable from a broken button.
+  if (state.downloading.has(id)) {
+    toast('That pack is already downloading — progress is on the map.', 3500);
+    return;
+  }
+
+  const existing = state.packs.get(id);
+  if (existing && Packs.packState(existing) === 'ready') {
+    toast('Pack already downloaded — this fire works offline.', 3000);
+    MapView.zoomToFire(feature);
+    return;
+  }
+
+  const est = Packs.estimatePack(feature);
+  if (est.tooBig) { toast(`Too large: ${est.count} tiles.`, 5000); return; }
+  if (est.shouldWarn) {
+    const ok = confirm(
+      `${Packs.fireName(feature.properties)}\n\n` +
+      `${est.count} map tiles, roughly ${fmtBytes(est.estBytes)}.\n\n` +
+      `Download now? Best done on wifi.`
+    );
+    if (!ok) return;
+  }
+
+  await downloadFire(feature);
+}
+
+async function downloadFire(feature) {
+  const id = feature.properties.id;
+  const name = Packs.fireName(feature.properties);
+  state.downloading.add(id);
+  state.dlProgress.set(id, { name, done: 0, total: 1 });
+  renderFireList();
+  updateDlPill();
+
+  const bar = document.querySelector(`[data-progress="${cssEscape(id)}"] > div`);
+  try {
+    const pack = await Packs.downloadPack(feature, ({ done, total }) => {
+      const el = document.querySelector(`[data-progress="${cssEscape(id)}"] > div`) || bar;
+      if (el) el.style.width = `${Math.round((done / total) * 100)}%`;
+      state.dlProgress.set(id, { name, done, total });
+      updateDlPill();
+    });
+    state.packs.set(id, pack);
+    MapView.setPackStates(packStateMap());
+    toast(
+      pack.failed
+        ? `${pack.name}: ${pack.failed} of ${pack.tileCount} tiles missing. Tap Update on this fire to fetch just those.`
+        : `${pack.name} ready for offline use (${fmtBytes(pack.bytes)}).`,
+      6000
+    );
+    if (Sync.isEnabled() && navigator.onLine) {
+      try { await Sync.pullForFires([id]); await refreshPoints(); } catch {}
+    }
+  } catch (err) {
+    toast(err.name === 'AbortError' ? 'Download cancelled' : `Download failed: ${err.message}`, 5000);
+  } finally {
+    state.downloading.delete(id);
+    state.dlProgress.delete(id);
+    updateDlPill();
+    await updateStorageDisplay();
+    renderFireList();
+  }
+}
+
+/** One pill covers all running downloads; hidden when there are none. */
+function updateDlPill() {
+  const pill = $('#dl-pill');
+  const jobs = [...state.dlProgress.values()];
+  if (!jobs.length) { pill.hidden = true; return; }
+  pill.hidden = false;
+  const done = jobs.reduce((a, j) => a + j.done, 0);
+  const total = jobs.reduce((a, j) => a + j.total, 0) || 1;
+  $('#dl-pill-fill').style.width = `${Math.round((done / total) * 100)}%`;
+  $('#dl-pill-text').textContent = jobs.length === 1
+    ? `Downloading ${jobs[0].name} · ${Math.round((done / total) * 100)}%`
+    : `Downloading ${jobs.length} packs · ${Math.round((done / total) * 100)}%`;
+}
+
+async function deleteFirePack(fireId) {
+  const local = state.points.filter(p => p.fireId === fireId && p.status === 'pending');
+  if (local.length && !confirm(
+    `${local.length} measurement(s) from this fire have not been synced yet.\n\n` +
+    `Deleting the pack keeps your measurements, but you will lose the offline map. Continue?`
+  )) return;
+
+  await Packs.removePack(fireId);
+  state.packs.delete(fireId);
+  MapView.setPackStates(packStateMap());
+  await updateStorageDisplay();
+  renderFireList();
+  toast('Pack deleted.');
+}
+
+// ══════════════════════════════════════════════════════════ fire list
+function renderFireList() {
+  const idx = MapView.getFireIndex();
+  const ul = $('#fire-list');
+  if (!idx) { ul.innerHTML = '<li class="muted">Loading fire index…</li>'; return; }
+
+  let items;
+  if (state.listFilter.near && state.gps) {
+    items = MapView.firesNear(state.gps.lat, state.gps.lon, 40);
+  } else {
+    items = idx.features.map(f => ({ f, d: null }));
+  }
+
+  const q = state.listFilter.text.trim().toLowerCase();
+  if (q) {
+    items = items.filter(({ f }) => {
+      const p = f.properties;
+      return `${Packs.fireName(p)} ${p.id} ${p.COUNTRY || ''}`.toLowerCase().includes(q);
+    });
+  }
+  if (state.listFilter.downloadedOnly) items = items.filter(({ f }) => state.packs.has(f.properties.id));
+  if (!state.listFilter.near && !q) items = items.slice(0, 60);
+
+  if (!items.length) { ul.innerHTML = '<li class="muted">No fires match.</li>'; return; }
+
+  ul.innerHTML = '';
+  for (const { f, d } of items) {
+    const p = f.properties;
+    const pack = state.packs.get(p.id);
+    const st = state.downloading.has(p.id) ? 'downloading' : Packs.packState(pack);
+    const badge = {
+      none: '<span class="badge badge--none">Not downloaded</span>',
+      ready: '<span class="badge badge--ready">Offline ready</span>',
+      stale: '<span class="badge badge--stale">Update available</span>',
+      downloading: '<span class="badge badge--pending">Downloading…</span>',
+    }[st];
+
+    const li = document.createElement('li');
+    li.className = 'fire-card';
+    li.dataset.state = st === 'downloading' ? 'none' : st;
+    li.innerHTML = `
+      <div class="fire-card__top">
+        <div>
+          <p class="fire-card__name">${esc(Packs.fireName(p))}</p>
+          <div class="fire-card__meta">${esc(Packs.fireSubtitle(p))}${d != null ? ` · ${fmtDistance(d)} away` : ''}</div>
+          ${pack ? `<div class="fire-card__meta">${fmtBytes(pack.bytes)} · ${new Date(pack.downloadedAt).toLocaleDateString('en-GB')}</div>` : ''}
+        </div>
+        ${badge}
+      </div>
+      <div class="fire-card__actions"></div>
+      ${st === 'downloading' ? `<div class="progress" data-progress="${esc(p.id)}"><div></div></div>` : ''}
+    `;
+
+    const actions = li.querySelector('.fire-card__actions');
+    actions.append(mkBtn('Show on map', 'btn--sm', () => { showTab('map'); MapView.zoomToFire(f); }));
+    if (st === 'none') actions.append(mkBtn('Download', 'btn--sm btn--primary', () => handleFireSelect(f)));
+    if (st === 'stale') actions.append(mkBtn('Update', 'btn--sm btn--primary', () => downloadFire(f)));
+    if (pack) actions.append(mkBtn('Delete pack', 'btn--sm', () => deleteFirePack(p.id)));
+    ul.append(li);
+  }
+}
+
+// ══════════════════════════════════════════════════════════ GPS
+function startGps() {
+  if (!navigator.geolocation) { toast('This device has no location support.'); return; }
+  navigator.geolocation.watchPosition(
+    (pos) => {
+      const { latitude, longitude, accuracy } = pos.coords;
+      state.gps = { lat: latitude, lon: longitude, accuracy, ts: pos.timestamp };
+      MapView.showGps(latitude, longitude, accuracy);
+      if ($('#point-dialog').open && state.draft && !state.draft.manual) {
+        state.draft = { lat: latitude, lon: longitude, accuracy, manual: false };
+        renderDraftLocation();
+      }
+    },
+    (err) => {
+      if (err.code === err.PERMISSION_DENIED) {
+        toast('Location permission denied. You can still place points by tapping the map.', 6000);
+      }
+    },
+    { enableHighAccuracy: true, maximumAge: 5000, timeout: 20000 }
+  );
+}
+
+// ══════════════════════════════════════════════════════════ record form
+function wireButtons() {
+  $('#btn-add').addEventListener('click', openForm);
+  $('#btn-locate').addEventListener('click', () => {
+    if (state.gps) MapView.centreOnGps(state.gps.lat, state.gps.lon);
+    else toast('Still waiting for a GPS fix…');
+  });
+  $('#fire-search').addEventListener('input', (e) => {
+    state.listFilter.text = e.target.value; renderFireList();
+  });
+  $('#btn-near-me').addEventListener('click', (e) => {
+    if (!state.gps) { toast('Waiting for a GPS fix…'); return; }
+    state.listFilter.near = !state.listFilter.near;
+    e.target.classList.toggle('is-on', state.listFilter.near);
+    renderFireList();
+  });
+  $('#btn-show-downloaded').addEventListener('click', (e) => {
+    state.listFilter.downloadedOnly = !state.listFilter.downloadedOnly;
+    e.target.classList.toggle('is-on', state.listFilter.downloadedOnly);
+    renderFireList();
+  });
+  $('#btn-export').addEventListener('click', exportCsv);
+  $('#btn-sync').addEventListener('click', doSync);
+  $('#sync-pill').addEventListener('click', () => showTab('data'));
+  $('#btn-review-reload').addEventListener('click', openReviewQueue);
+  $('#btn-backup').addEventListener('click', downloadBackup);
+}
+
+// ══════════════════════════════════════════════════════════ backup (admin)
+function saveBlob(blob, name) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+
+/**
+ * Full-database export: every measurement, every status, as JSON (lossless,
+ * for restoring) and CSV (for spreadsheets/R). Photos are not downloaded -
+ * their Storage URLs are in both files.
+ */
+async function downloadBackup() {
+  const st = $('#backup-status');
+  try {
+    st.textContent = 'Fetching…';
+    const rows = await Sync.fetchAll((n) => { st.textContent = `Fetching… ${n}`; });
+    if (!rows.length) { st.textContent = 'Database is empty.'; return; }
+    const day = new Date().toISOString().slice(0, 10);
+    saveBlob(new Blob([JSON.stringify(rows, null, 1)], { type: 'application/json' }),
+             `peatprobe-backup-${day}.json`);
+    const cols = ['uuid', 'status', 'lat', 'lon', 'accuracyM', 'depthMean', 'depths',
+      'combustion', 'gridId', 'gridDistM', 'fireId', 'fireName', 'comment', 'surveyor',
+      'userEmail', 'createdAt', 'syncedAt', 'locationSource', 'photoUrls'];
+    const cell = (r, c) => {
+      let v = r[c];
+      if (Array.isArray(v)) v = v.join('; ');
+      if ((c === 'createdAt' || c === 'syncedAt') && v) v = new Date(v).toISOString();
+      return `"${String(v ?? '').replace(/"/g, '""')}"`;
+    };
+    const csv = [cols.join(',')]
+      .concat(rows.map(r => cols.map(c => cell(r, c)).join(',')))
+      .join('\r\n');
+    saveBlob(new Blob(['﻿' + csv], { type: 'text/csv' }),
+             `peatprobe-backup-${day}.csv`);
+    st.textContent = `Saved ${rows.length} measurement(s) as JSON + CSV.`;
+  } catch (e) {
+    st.textContent = `Backup failed: ${e.message || e}`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════ fire detail
+async function openFireDetail(feature) {
+  const dlg = $('#fire-dialog');
+  const host = $('#fire-detail');
+  state.detailFire = feature;
+  const id = feature.properties.id;
+
+  host.innerHTML = '<p class="muted">Loading…</p>';
+  dlg.showModal();
+
+  const stats = await Chart.statsFor(id);
+  const pr = feature.properties;
+  const ok = Chart.renderFireChart(host, stats, {
+    name: Packs.fireName(pr),
+    firedate: pr.FIREDATE,
+    finaldate: pr.FINALDATE,
+    id: pr.id,
+  });
+  if (!ok) {
+    host.innerHTML =
+      `<h3>${esc(Packs.fireName(feature.properties))}</h3>
+       <p class="muted small">${esc(Packs.fireSubtitle(feature.properties))}</p>
+       <p class="chart__empty">No burn severity for this fire. Severity was only
+       computed for fires of 50 ha or more that had a usable cloud-free
+       Sentinel-2 pair before and after the burn.</p>`;
+  }
+
+  const st = Packs.packState(state.packs.get(id));
+  const dl = $('#fire-download');
+  dl.textContent = { none: 'Download pack', ready: 'Pack downloaded', stale: 'Update pack' }[st];
+  dl.disabled = st === 'ready';
+}
+
+function wireFireDetail() {
+  $('#fire-close').addEventListener('click', () => $('#fire-dialog').close());
+  $('#fire-zoom').addEventListener('click', () => {
+    $('#fire-dialog').close();
+    if (state.detailFire) { showTab('map'); MapView.zoomToFire(state.detailFire); }
+  });
+  $('#fire-download').addEventListener('click', () => {
+    const f = state.detailFire;
+    $('#fire-dialog').close();
+    if (f) handleFireSelect(f);
+  });
+}
+
+function openForm() {
+  if (!state.gps) {
+    toast('No GPS fix yet — tap the map to place the point manually.', 5000);
+    beginManualPlacement();
+    return;
+  }
+  state.draft = { ...state.gps, manual: false };
+  resetForm();
+  renderDraftLocation();
+  $('#point-dialog').showModal();
+}
+
+function beginManualPlacement() {
+  showTab('map');
+  MapView.setPlacingMode(true);
+  const hint = $('#map-hint');
+  hint.textContent = 'Tap the map where you took the measurement';
+  hint.hidden = false;
+}
+
+function handleManualPlace(latlng) {
+  MapView.setPlacingMode(false);
+  $('#map-hint').hidden = true;
+  state.draft = { lat: latlng.lat, lon: latlng.lng, accuracy: null, manual: true };
+  resetForm();
+  renderDraftLocation();
+  $('#point-dialog').showModal();
+}
+
+function renderDraftLocation() {
+  const d = state.draft;
+  if (!d) return;
+  $('#loc-coords').textContent = `${d.lat.toFixed(5)}, ${d.lon.toFixed(5)}`;
+
+  const acc = $('#loc-acc');
+  if (d.manual) {
+    acc.textContent = 'Placed manually on the map';
+    acc.className = 'muted small';
+  } else if (d.accuracy != null) {
+    const poor = d.accuracy > QUALITY.maxAccuracyM;
+    acc.textContent = `GPS accuracy ±${Math.round(d.accuracy)} m` +
+      (poor ? ' — poor. Wait a moment or move to open sky if you can.' : '');
+    acc.className = poor ? 'small accuracy-warn' : 'muted small';
+  }
+
+  const hit = MapView.findFireNear(d.lat, d.lon, 100);
+  const fire = hit && hit.feature;
+  state.draft.fire = fire;
+  $('#loc-fire').textContent = !fire
+    ? 'Not near a mapped fire perimeter — that is fine, it will be recorded as unassigned.'
+    : hit.distM === 0
+      ? `Inside: ${Packs.fireName(fire.properties)}`
+      : `${Math.round(hit.distM)} m outside ${Packs.fireName(fire.properties)} — still counted as that fire.`;
+
+  // Nearest sampling node, so the surveyor sees which grid point this
+  // measurement will belong to before saving.
+  const gridEl = $('#loc-grid');
+  gridEl.textContent = '';
+  state.draft.grid = null;
+  if (fire) {
+    const seq = (state.draftSeq = (state.draftSeq || 0) + 1);
+    Grid.nearestNode(fire.properties.id, d.lat, d.lon).then((node) => {
+      if (seq !== state.draftSeq || !node) return;   // a newer GPS fix won
+      state.draft.grid = node;
+      gridEl.textContent = node.distM <= GRID_ATTACH_M
+        ? `Grid point ${node.id} · ${Math.round(node.distM)} m away`
+        : `Nearest grid point ${node.id} is ${Math.round(node.distM)} m away — too far to attach.`;
+    }).catch(() => {});
+  }
+}
+
+function wireForm() {
+  const dlg = $('#point-dialog');
+  $('#form-close').addEventListener('click', () => dlg.close());
+  $('#form-cancel').addEventListener('click', () => dlg.close());
+  $('#form-save').addEventListener('click', savePoint);
+  $('#btn-pick-on-map').addEventListener('click', () => { dlg.close(); beginManualPlacement(); });
+
+  $('#btn-ar').addEventListener('click', async () => {
+    const m = await AR.detect();
+    try {
+      if (m === 'quicklook') { AR.quickLookOpen(); return; }
+      if (m === 'webxr') {
+        $('#point-dialog').close();                 // the camera needs the screen
+        await AR.webxrStart(() => $('#point-dialog').showModal());
+      }
+    } catch {
+      toast('Could not start the camera view on this phone.', 4000);
+    }
+  });
+
+  $$('[data-depth]').forEach(i => i.addEventListener('input', updateMean));
+
+  // Each selection APPENDS - one photo is required, more are welcome.
+  $('#photo-input').addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';                    // so the same camera shot twice still fires change
+    if (!file) return;
+    try {
+      const blob = await resizePhoto(file);
+      state.photos.push({ blob, url: URL.createObjectURL(blob) });
+      renderPhotoPreviews();
+    } catch {
+      toast('Could not read that image. Try taking the photo again.', 5000);
+    }
+  });
+}
+
+function readDepths() {
+  return $$('[data-depth]').map((i) => {
+    const v = parseFloat(i.value);
+    return Number.isFinite(v) ? v : null;
+  });
+}
+
+function updateMean() {
+  const vals = readDepths().filter(v => v != null);
+  if (!vals.length) { $('#depth-mean').textContent = '—'; $('#depth-spread').textContent = ''; return; }
+  const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+  $('#depth-mean').textContent = `${mean.toFixed(1)} cm`;
+  $('#depth-spread').textContent = vals.length > 1
+    ? `(${vals.length} readings, range ${Math.min(...vals)}–${Math.max(...vals)} cm)`
+    : '(1 reading)';
+}
+
+function resetForm() {
+  $$('[data-depth]').forEach(i => { i.value = ''; });
+  $('#combustion-input').value = '';
+  $('#comment-input').value = '';
+  $('#form-error').hidden = true;
+  for (const p of state.photos) URL.revokeObjectURL(p.url);
+  state.photos = [];
+  $('#photo-input').value = '';
+  renderPhotoPreviews();
+  updateMean();
+}
+
+function renderPhotoPreviews() {
+  const host = $('#photo-previews');
+  host.innerHTML = '';
+  state.photos.forEach((p, i) => {
+    const d = document.createElement('div');
+    d.className = 'ph';
+    d.innerHTML = `<img src="${p.url}" alt="Photo ${i + 1}"><button type="button" aria-label="Remove photo ${i + 1}">✕</button>`;
+    d.querySelector('button').addEventListener('click', () => {
+      URL.revokeObjectURL(p.url);
+      state.photos.splice(i, 1);
+      renderPhotoPreviews();
+    });
+    host.appendChild(d);
+  });
+  $('#photo-hint').textContent = state.photos.length
+    ? `${state.photos.length} photo(s) added — tap above to add another.`
+    : 'Include a ruler or a familiar object for scale. You can add several — tap again after the first.';
+}
+
+async function resizePhoto(file) {
+  const bmp = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const scale = Math.min(1, QUALITY.photoMaxEdgePx / Math.max(bmp.width, bmp.height));
+  const w = Math.round(bmp.width * scale), h = Math.round(bmp.height * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  canvas.getContext('2d').drawImage(bmp, 0, 0, w, h);
+  bmp.close && bmp.close();
+  return new Promise((res, rej) =>
+    canvas.toBlob(b => (b ? res(b) : rej(new Error('encode failed'))), 'image/jpeg', QUALITY.photoQuality)
+  );
+}
+
+async function savePoint() {
+  const err = $('#form-error');
+  err.hidden = true; // never leave a stale message from a previous attempt
+  const depths = readDepths();
+  const vals = depths.filter(v => v != null);
+
+  if (!vals.length) return showErr(err, 'Enter at least one burn depth reading.');
+  if (vals.some(v => v < 0 || v > QUALITY.maxDepthCm)) {
+    return showErr(err, `Readings must be between 0 and ${QUALITY.maxDepthCm} cm.`);
+  }
+  const combustion = $('#combustion-input').value;
+  // Required like the photo: it is one tap, and without it a depth reading
+  // cannot be interpreted against how much fuel actually burned. Delete these
+  // two lines to make it optional.
+  if (!combustion) return showErr(err, 'Choose how completely the vegetation burned.');
+  if (!state.photos.length) return showErr(err, 'At least one photo is required. It is how we check readings later.');
+  if (!state.draft) return showErr(err, 'No location set.');
+  // Mirror the server rules' UK bounding box here, so a mis-tapped test point
+  // fails NOW with a real explanation instead of a cryptic permission error
+  // at sync time.
+  if (!(state.draft.lat > 49 && state.draft.lat < 61 &&
+        state.draft.lon > -9 && state.draft.lon < 2.5)) {
+    return showErr(err, 'This location is outside the UK, and the database only accepts UK points. Place the point inside the UK.');
+  }
+
+  const uuid = crypto.randomUUID();
+  const surveyor = $('#surveyor-input').value.trim();
+  const fire = state.draft.fire;
+
+  const point = {
+    uuid,
+    fireId: fire ? fire.properties.id : null,
+    fireName: fire ? Packs.fireName(fire.properties) : null,
+    lat: state.draft.lat,
+    lon: state.draft.lon,
+    accuracyM: state.draft.accuracy,
+    manualPlacement: !!state.draft.manual,
+    depths,
+    depthMean: vals.reduce((a, b) => a + b, 0) / vals.length,
+    combustion,
+    gridId: (state.draft.grid && state.draft.grid.distM <= GRID_ATTACH_M) ? state.draft.grid.id : null,
+    gridDistM: (state.draft.grid && state.draft.grid.distM <= GRID_ATTACH_M)
+      ? Math.round(state.draft.grid.distM) : null,
+    comment: $('#comment-input').value.trim(),
+    surveyor,
+    hasPhoto: true,
+    photoCount: state.photos.length,
+    photoUrl: null,
+    status: 'pending',
+    createdAt: Date.now(),
+  };
+
+  for (let i = 0; i < state.photos.length; i++) {
+    await DB.putPhoto(`${uuid}:${i}`, state.photos[i].blob);
+  }
+  await DB.putPoint(point);
+  if (surveyor) await DB.setMeta('surveyor', surveyor);
+
+  $('#point-dialog').close();
+  await refreshPoints();
+  updateSyncPill();
+  toast('Measurement saved to this device.');
+
+  if (Sync.isEnabled() && navigator.onLine) doSync({ quiet: true });
+}
+
+const showErr = (el, msg) => { el.textContent = msg; el.hidden = false; el.scrollIntoView({ block: 'nearest' }); };
+
+// ══════════════════════════════════════════════════════════ points
+async function refreshPoints() {
+  state.points = await DB.allPoints();
+  state.points.sort((a, b) => b.createdAt - a.createdAt);
+
+  for (const url of state.photoUrls.values()) URL.revokeObjectURL(url);
+  state.photoUrls.clear();
+  for (const p of state.points) {
+    if (p.remote && p.photoUrl) { state.photoUrls.set(p.uuid, p.photoUrl); continue; }
+    const blob = (p.photoCount != null ? await DB.getPhoto(`${p.uuid}:0`) : null)
+              || await DB.getPhoto(p.uuid);
+    if (blob) state.photoUrls.set(p.uuid, URL.createObjectURL(blob));
+  }
+  MapView.renderPoints(state.points, state.photoUrls);
+  renderPointList();
+}
+
+function renderCampaigns() {
+  const block = $('#campaign-block');
+  const ul = $('#campaign-list');
+  const groups = new Map();
+  for (const p of state.points) {
+    let fireId = p.fireId, fireName = p.fireName;
+    if (!fireId) {
+      // Older points saved without the buffer: re-attach for display only.
+      const near = MapView.findFireNear(p.lat, p.lon, 100);
+      if (near) { fireId = near.feature.properties.id; fireName = Packs.fireName(near.feature.properties); }
+    }
+    const key = fireId || 'unassigned';
+    let g = groups.get(key);
+    if (!g) groups.set(key, g = { fireId, name: fireName || 'Outside mapped fires',
+      n: 0, latest: 0, earliest: Infinity, who: new Set(), lat: p.lat, lon: p.lon });
+    g.n++; g.latest = Math.max(g.latest, p.createdAt || 0);
+    g.earliest = Math.min(g.earliest, p.createdAt || Infinity);
+    g.who.add(p.surveyor || p.userId || '?');
+  }
+  const rows = [...groups.values()].sort((a, b) => b.latest - a.latest).slice(0, 10);
+  if (!rows.length) { block.hidden = true; return; }
+  block.hidden = false;
+  ul.innerHTML = '';
+  const d = (t) => new Date(t).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  for (const g of rows) {
+    const li = document.createElement('li');
+    li.className = 'fire-card';
+    const span = d(g.earliest) === d(g.latest) ? d(g.latest) : `${d(g.earliest)} – ${d(g.latest)}`;
+    li.innerHTML = `<div class="fire-card__top"><div>
+        <p class="fire-card__name">${esc(g.name)}</p>
+        <div class="fire-card__meta">${g.n} point(s) · ${span} · ${g.who.size} surveyor(s)</div>
+      </div><span class="badge badge--ready">Sampled</span></div>`;
+    li.style.cursor = 'pointer';
+    li.addEventListener('click', () => {
+      showTab('map');
+      const idx = MapView.getFireIndex();
+      const f = g.fireId && idx && idx.features.find(x => x.properties.id === g.fireId);
+      if (f) MapView.zoomToFire(f); else MapView.flyTo(g.lat, g.lon, 14);
+    });
+    ul.appendChild(li);
+  }
+}
+
+function renderPointList() {
+  renderCampaigns();
+  const ul = $('#point-list');
+  if (!state.points.length) {
+    ul.innerHTML = '<li class="muted">No measurements yet. Open the map and tap <strong>+ Record</strong>.</li>';
+    return;
+  }
+  ul.innerHTML = '';
+  for (const p of state.points) {
+    const li = document.createElement('li');
+    li.className = 'point-card';
+    const img = state.photoUrls.get(p.uuid);
+    li.innerHTML = `
+      ${img ? `<img src="${img}" alt="">` : '<div style="width:56px;height:56px;border-radius:8px;background:var(--line)"></div>'}
+      <div class="point-card__main">
+        <div class="point-card__depth">${p.depthMean != null ? p.depthMean.toFixed(1) : '?'} cm</div>
+        <div class="muted small">${esc(p.fireName || 'Unassigned')} · ${new Date(p.createdAt).toLocaleDateString('en-GB')}</div>
+        <div class="muted small">${p.depths.filter(d => d != null).length} reading(s)${p.accuracyM != null ? ` · ±${Math.round(p.accuracyM)} m` : ''}</div>
+        ${p.combustion ? `<div class="muted small">${esc(COMBUSTION[p.combustion] || p.combustion)}</div>` : ''}
+        ${p.gridId ? `<div class="muted small">Grid ${esc(p.gridId)}</div>` : ''}
+        ${(p.photoCount || 0) > 1 ? `<div class="muted small">${p.photoCount} photos</div>` : ''}
+      </div>
+      <span class="badge badge--${p.status === 'pending' ? 'pending' : 'ready'}">${p.status === 'pending' ? 'Unsynced' : 'Synced'}</span>
+      ${p.status === 'pending' ? '<button class="icon-btn" data-del aria-label="Delete this unsynced measurement">🗑</button>' : ''}
+    `;
+    const del = li.querySelector('[data-del]');
+    if (del) del.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!confirm('Delete this unsynced measurement and its photos? This cannot be undone.')) return;
+      for (let k = 0; k < (p.photoCount || 1); k++) await DB.deletePhoto(`${p.uuid}:${k}`).catch(() => {});
+      await DB.deletePhoto(p.uuid).catch(() => {});
+      await DB.deletePoint(p.uuid);
+      await refreshPoints(); updateSyncPill();
+      toast('Deleted.');
+    });
+    li.addEventListener('click', () => { showTab('map'); MapView.flyTo(p.lat, p.lon, 17); });
+    ul.append(li);
+  }
+}
+
+/** "Signed in as …" + sign-out, so a borrowed phone can switch accounts. */
+async function renderAuthLine() {
+  const el = $('#auth-line');
+  if (!Sync.isEnabled()) { el.hidden = true; return; }
+  let user = null;
+  try { user = await Sync.currentUser(); } catch {}
+  if (!user) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `Signed in as <strong>${esc(user.email || user.uid)}</strong> ·
+    <button type="button" id="btn-signout" class="btn btn--sm" style="min-height:30px">Sign out</button>`;
+  $('#btn-signout').addEventListener('click', async () => {
+    try {
+      await Sync.signOut();
+      $('#tab-review').hidden = true;
+      renderAuthLine();
+      toast('Signed out. The next Sync now will ask who is signing in.', 4500);
+    } catch (e) { toast(`Sign-out failed: ${e.message}`, 4000); }
+  });
+}
+
+// ══════════════════════════════════════════════════════════ review (admin)
+async function openReviewQueue() {
+  const host = $('#review-list');
+  try {
+    await Review.open(host, {
+      onShowOnMap: (r) => { showTab('map'); MapView.flyTo(r.lat, r.lon, 16); },
+      onDecided: (r, status) => toast(status === 'verified' ? 'Approved.' : 'Rejected.', 1500),
+      onRelocate: async (r, c) => {
+        // The fire and grid node were derived from the WRONG position, so
+        // re-derive both at the corrected one before writing.
+        const hit = MapView.findFireNear(c.lat, c.lon, 100);
+        const fire = hit && hit.feature;
+        const fields = {
+          lat: c.lat, lon: c.lon,
+          fireId: fire ? fire.properties.id : null,
+          fireName: fire ? Packs.fireName(fire.properties) : null,
+          gridId: null, gridDistM: null,
+        };
+        if (fire) {
+          const node = await Grid.nearestNode(fire.properties.id, c.lat, c.lon)
+            .catch(() => null);
+          if (node && node.distM <= GRID_ATTACH_M) {
+            fields.gridId = node.id;
+            fields.gridDistM = Math.round(node.distM);
+          }
+        }
+        await Sync.setLocation(r.uuid, fields);
+        const local = await DB.getPoint(r.uuid);
+        if (local) { Object.assign(local, fields); await DB.putPoint(local); await refreshPoints(); }
+        toast(`Moved to ${c.lat.toFixed(5)}, ${c.lon.toFixed(5)}` +
+              (fields.gridId ? ` · grid ${fields.gridId}` : ''), 3500);
+      },
+    });
+  } catch (e) {
+    // Diagnostic-rich failure: say WHO the request ran as, so a rules problem
+    // and a session problem stop looking identical.
+    let who = 'unknown';
+    try { const u = await Sync.currentUser(); who = u ? (u.email || u.uid) : 'not signed in'; }
+    catch {}
+    host.innerHTML = `<p class="form-error">Could not load the queue: ${esc(e.message)}
+      <br><span class="small">Signed in as: ${esc(who)} · ${esc(e.code || '')}</span></p>
+      <p class="muted small">If you are signed in and this persists, the deployed
+      Firestore rules likely differ from the repo copy — re-paste
+      firestore.rules in the console (Regeln → Veröffentlichen) and retry.</p>`;
+  }
+}
+
+// ══════════════════════════════════════════════════════════ sync + export
+function updateSyncPill() {
+  const n = state.points.filter(p => p.status === 'pending').length;
+  const pill = $('#sync-pill');
+  pill.hidden = n === 0;
+  pill.textContent = `${n} unsynced`;
+  const note = $('#sync-note');
+  if (!Sync.isEnabled()) {
+    note.innerHTML = n
+      ? `<strong>${n} measurement(s) held on this device.</strong> Cloud sync is off, so export a CSV before uninstalling or clearing your browser.`
+      : 'Cloud sync is off. Measurements stay on this device — export a CSV to get them out.';
+  } else {
+    note.textContent = n ? `${n} measurement(s) waiting to upload.` : 'Everything is synced.';
+  }
+}
+
+async function doSync(opts = {}) {
+  if (!Sync.isEnabled()) {
+    if (!opts.quiet) toast('Cloud sync is not configured yet. Use Export CSV instead.', 5000);
+    return;
+  }
+  if (!navigator.onLine) { if (!opts.quiet) toast('No connection. Your data is safe — try again later.', 4000); return; }
+
+  const btn = $('#btn-sync');
+  btn.disabled = true;
+  const original = btn.textContent;
+  try {
+    let user = await Sync.currentUser();
+    if (!user) {
+      // A background sync must never rip the user out of the app into a
+      // sign-in flow. Only an explicit Sync-now tap may start one; until
+      // then the unsynced pill keeps count.
+      if (opts.quiet) { btn.disabled = false; btn.textContent = original; return; }
+      btn.textContent = 'Signing in…';
+      user = await Sync.signIn();
+      if (!user) {
+        // Redirect flow: the page is navigating to Google; sync resumes
+        // automatically when it returns.
+        toast('Taking you to Google to sign in…', 4000);
+        return;
+      }
+      Sync.isAdminUser().then((ok) => { if (ok) $('#tab-review').hidden = false; }).catch(() => {});
+      renderAuthLine();
+    }
+
+    btn.textContent = 'Uploading…';
+    const { pushed, failed, firstError } = await Sync.pushPending(({ done, total }) => {
+      btn.textContent = `Uploading ${done}/${total}…`;
+    });
+
+    const fireIds = [...state.packs.keys()];
+    if (fireIds.length) { btn.textContent = 'Fetching…'; await Sync.pullForFires(fireIds); }
+    btn.textContent = 'Fetching recent…';
+    try { await Sync.pullRecent(300); } catch {}
+
+    await refreshPoints();
+    updateSyncPill();
+    if (!opts.quiet || pushed || failed) {
+      toast(failed
+        ? `Uploaded ${pushed}, ${failed} failed: ${firstError || 'unknown error'}`
+        : `Synced ${pushed} measurement(s).`, failed ? 9000 : 3200);
+    }
+  } catch (e) {
+    if (!opts.quiet) toast(`Sync failed: ${e.message}`, 5000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = original;
+  }
+}
+
+function exportCsv() {
+  if (!state.points.length) { toast('Nothing to export yet.'); return; }
+  const cols = ['uuid', 'created_iso', 'surveyor', 'fire_id', 'fire_name', 'lat', 'lon',
+    'gps_accuracy_m', 'manual_placement', 'depth_1', 'depth_2', 'depth_3', 'depth_4', 'depth_5',
+    'depth_mean_cm', 'depth_n', 'combustion', 'grid_id', 'grid_dist_m', 'comment', 'photo_url', 'photo_count', 'status'];
+  const q = (v) => {
+    if (v == null) return '';
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const rows = state.points.map(p => [
+    p.uuid, new Date(p.createdAt).toISOString(), p.surveyor, p.fireId, p.fireName,
+    p.lat.toFixed(6), p.lon.toFixed(6), p.accuracyM != null ? Math.round(p.accuracyM) : '',
+    p.manualPlacement ? 'yes' : 'no',
+    ...[0, 1, 2, 3, 4].map(i => p.depths[i] ?? ''),
+    p.depthMean != null ? p.depthMean.toFixed(2) : '',
+    p.depths.filter(d => d != null).length,
+    p.combustion || '',
+    p.gridId || '', p.gridDistM != null ? p.gridDistM : '',
+    p.comment, p.photoUrl, p.photoCount ?? (p.hasPhoto ? 1 : 0), p.status,
+  ].map(q).join(','));
+
+  const blob = new Blob(['\uFEFF' + cols.join(',') + '\n' + rows.join('\n')],
+    { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `peatprobe-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast('CSV exported. Photos are not included — sync for those.', 5000);
+}
+
+// ══════════════════════════════════════════════════════════ misc
+function wireNetwork() {
+  const pill = $('#net-pill');
+  const set = () => {
+    const on = navigator.onLine;
+    pill.dataset.state = on ? 'online' : 'offline';
+    pill.textContent = on ? 'online' : 'offline';
+  };
+  window.addEventListener('online', () => { set(); if (Sync.isEnabled()) doSync({ quiet: true }); });
+  window.addEventListener('offline', set);
+  set();
+}
+
+async function updateStorageDisplay() {
+  const info = await DB.storageInfo();
+  const packs = [...state.packs.values()];
+  const packBytes = packs.reduce((a, p) => a + (p.bytes || 0), 0);
+  if (!info) {
+    $('#storage-text').textContent = `${packs.length} pack(s), ${fmtBytes(packBytes)}.`;
+    return;
+  }
+  const pct = info.quota ? Math.min(100, (info.usage / info.quota) * 100) : 0;
+  $('#storage-fill').style.width = `${pct}%`;
+  $('#storage-text').innerHTML =
+    `${packs.length} pack(s) · ${fmtBytes(info.usage)} used of ${fmtBytes(info.quota)} available` +
+    (info.persisted
+      ? ' · <span style="color:var(--ok)">storage protected</span>'
+      : ' · <span style="color:var(--ember)">not protected — add to home screen</span>');
+}
+
+let toastTimer;
+function toast(msg, ms = 3200) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+}
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const cssEscape = (s) => String(s).replace(/["\\]/g, '\\$&');
+
+function mkBtn(label, cls, onClick) {
+  const b = document.createElement('button');
+  b.className = `btn ${cls}`;
+  b.textContent = label;
+  b.addEventListener('click', onClick);
+  return b;
+}
+
+boot();

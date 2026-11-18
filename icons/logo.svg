@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="PeatProbe">
+  <defs>
+    <clipPath id="pp-clip"><circle cx="64" cy="64" r="58"/></clipPath>
+    <linearGradient id="pp-sky" gradientUnits="userSpaceOnUse" x1="0" y1="6" x2="0" y2="84">
+      <stop offset="0" stop-color="#EBE4D7"/>
+      <stop offset="1" stop-color="#D6DEDD"/>
+    </linearGradient>
+    <linearGradient id="pp-flame" gradientUnits="userSpaceOnUse" x1="0" y1="16" x2="0" y2="88">
+      <stop offset="0" stop-color="#F2B35C"/>
+      <stop offset="1" stop-color="#D96A2B"/>
+    </linearGradient>
+    <linearGradient id="pp-inner" gradientUnits="userSpaceOnUse" x1="0" y1="42" x2="0" y2="86">
+      <stop offset="0" stop-color="#F9E0A2"/>
+      <stop offset="1" stop-color="#F2B35C"/>
+    </linearGradient>
+    <linearGradient id="pp-p1" gradientUnits="userSpaceOnUse" x1="0" y1="82" x2="0" y2="97">
+      <stop offset="0" stop-color="#6E4C34"/>
+      <stop offset="1" stop-color="#5C3F2B"/>
+    </linearGradient>
+    <linearGradient id="pp-p2" gradientUnits="userSpaceOnUse" x1="0" y1="97" x2="0" y2="110">
+      <stop offset="0" stop-color="#4C3421"/>
+      <stop offset="1" stop-color="#3E2A1B"/>
+    </linearGradient>
+    <linearGradient id="pp-p3" gradientUnits="userSpaceOnUse" x1="0" y1="110" x2="0" y2="126">
+      <stop offset="0" stop-color="#332317"/>
+      <stop offset="1" stop-color="#281B12"/>
+    </linearGradient>
+  </defs>
+  <circle cx="64" cy="64" r="58" fill="url(#pp-sky)"/>
+  <g clip-path="url(#pp-clip)">
+    <path d="M64,16 C72,36 86,46 86,62 C86,77 76,87 64,87 C52,87 42,77 42,62 C42,48 56,42 59,28 C62,42 62,32 64,16 Z" fill="url(#pp-flame)"/>
+    <path d="M65,42 C70,54 77,60 77,69 C77,78 71,84 65,84 C58,84 52,78 52,69 C52,63 59,59 61,50 C63,59 64,52 65,42 Z" fill="url(#pp-inner)"/>
+    <path d="M-6,84 L24,80 L52,83 L80,80 L106,83 L134,80 L134,97 L-6,97 Z" fill="url(#pp-p1)"/>
+    <rect x="-6" y="97" width="140" height="13" fill="url(#pp-p2)"/>
+    <rect x="-6" y="110" width="140" height="18" fill="url(#pp-p3)"/>
+    <path d="M-6,84 L24,80 L52,83 L80,80 L106,83 L134,80 L134,83 L106,86 L80,83 L52,86 L24,83 L-6,87 Z" fill="#2A211A" opacity=".8"/>
+  </g>
+  <circle cx="64" cy="64" r="58" fill="none" stroke="#3A2A1E" stroke-width="4.5"/>
+</svg>

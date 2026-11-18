@@ -1,0 +1,18 @@
+# ── generated, but COMMITTED because GitHub Pages serves straight from the
+#    repo and the app fetches these at runtime ──
+#    data/fires/    1,599 per-fire perimeters (~11 MB)
+#    data/corine/   CORINE tiles z6-11 (~2,600 tiles, ~5 MB)
+#    Both rebuild from data/source/ via tools/.
+
+# Intermediate build artefact (7.6 MB) - not needed at runtime.
+data/fires-detail.geojson
+
+# ── source rasters: large, and re-exportable from Earth Engine at any time.
+#    Keep them locally, keep them out of git. ──
+data/source/corine/
+data/source/dnbr/
+
+# OS noise
+Thumbs.db
+.DS_Store
+desktop.ini

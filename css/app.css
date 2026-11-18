@@ -1,0 +1,302 @@
+/* PeatProbe - field-first UI. High contrast, large tap targets, one-handed use. */
+:root{
+  --peat-900:#1F1712; --peat-800:#2C221A; --peat-700:#3A2517; --peat-600:#513520;
+  --peat-500:#6B4A2F; --ember:#EA580C; --ember-lt:#FBBF24;
+  --paper:#F6F1E8; --card:#FFFFFF; --line:#DDD2C0;
+  --ink:#241C17; --muted:#6E6156; --ok:#2F7D45; --bad:#B4231E;
+  --tap:48px; --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overscroll-behavior:none}
+body{
+  font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  color:var(--ink);background:var(--paper);
+  display:flex;flex-direction:column;height:100dvh;
+  -webkit-text-size-adjust:100%;
+}
+
+/* top bar */
+.topbar{display:flex;align-items:center;gap:10px;padding:10px 14px;
+  background:var(--peat-800);color:#F6F1E8;padding-top:calc(10px + env(safe-area-inset-top,0px));flex:none}
+.topbar__logo{border-radius:50%;flex:none}
+.topbar__title{font-size:18px;font-weight:700;margin:0;letter-spacing:.2px;flex:1}
+.topbar__status{display:flex;gap:6px;align-items:center}
+.pill{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;
+  background:rgba(255,255,255,.15);color:#F6F1E8;white-space:nowrap;border:0}
+.pill[data-state="offline"]{background:var(--ember);color:#fff}
+.pill--btn{cursor:pointer;background:var(--ember-lt);color:var(--peat-900)}
+
+/* views */
+main{flex:1;position:relative;overflow:hidden}
+.view{position:absolute;inset:0;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.view.is-active{display:block}
+#view-map.is-active{display:block;overflow:hidden}
+#map{position:absolute;inset:0}
+.pane{padding:16px 16px 32px;max-width:720px;margin:0 auto}
+.pane h2{margin:.2em 0 .4em;font-size:20px}
+
+/* map overlay */
+/* Actions live alone in the bottom-right; every Leaflet control (attribution,
+   scale, legend) is pushed to the bottom-left so nothing can sit on top of
+   the Record button. Laid out as a row so Record stays in the thumb corner. */
+.map-overlay{position:absolute;right:12px;bottom:42px;z-index:800;
+  display:flex;flex-direction:row;gap:10px;align-items:center}
+.fab{border:0;border-radius:999px;font-weight:700;cursor:pointer;
+  box-shadow:0 3px 12px rgba(0,0,0,.3);min-height:var(--tap)}
+.fab--primary{background:var(--ember);color:#fff;font-size:16px;padding:0 22px;
+  min-width:132px;box-shadow:0 3px 14px rgba(234,88,12,.45)}
+.fab--ghost{background:#fff;color:var(--peat-800);width:var(--tap);font-size:22px;padding:0}
+.map-hint{position:absolute;top:12px;left:50%;transform:translateX(-50%);z-index:500;
+  background:var(--peat-800);color:#fff;padding:10px 16px;border-radius:10px;
+  font-size:14px;font-weight:600;max-width:88%;text-align:center;box-shadow:0 3px 12px rgba(0,0,0,.3)}
+
+/* download progress pill: lives on the map so starting a pack from the popup
+   gives immediate, continuous feedback there - not only in the Packs tab */
+.dl-pill{position:absolute;left:50%;transform:translateX(-50%);bottom:112px;z-index:850;
+  background:var(--peat-900);color:#F6F1E8;border-radius:999px;padding:9px 16px 10px;
+  min-width:230px;max-width:88%;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+.dl-pill__bar{height:5px;background:rgba(246,241,232,.25);border-radius:999px;overflow:hidden;margin-bottom:6px}
+#dl-pill-fill{height:100%;width:0;background:var(--ember-lt);transition:width .25s}
+#dl-pill-text{font-size:12.5px;font-weight:600;display:block;text-align:center;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* buttons and fields */
+.btn{min-height:var(--tap);padding:0 16px;border-radius:10px;border:1.5px solid var(--line);
+  background:var(--card);color:var(--ink);font-size:15px;font-weight:600;cursor:pointer}
+.btn--primary{background:var(--ember);border-color:var(--ember);color:#fff}
+.btn--sm{min-height:38px;font-size:14px;padding:0 12px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.btn.is-on{background:var(--peat-800);border-color:var(--peat-800);color:#fff}
+.icon-btn{background:none;border:0;font-size:22px;cursor:pointer;color:var(--muted);min-width:var(--tap);min-height:var(--tap)}
+.row{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+.field{display:block;margin:16px 0}
+.field>span:first-child{display:block;font-weight:600;margin-bottom:6px;font-size:15px}
+input[type=text],input[type=search],input[type=number],textarea,select{
+  width:100%;min-height:var(--tap);padding:10px 12px;font-size:16px;
+  border:1.5px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font-family:inherit}
+select{appearance:none;-webkit-appearance:none;cursor:pointer;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),
+                   linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 19px) 21px,calc(100% - 13px) 21px;
+  background-size:6px 6px,6px 6px;background-repeat:no-repeat;padding-right:38px}
+input:focus,textarea:focus,select:focus{outline:2px solid var(--ember);outline-offset:1px}
+.muted{color:var(--muted)} .small{font-size:13px}
+.req{color:var(--ember);font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.4px}
+
+/* storage bar */
+.storage-bar{height:8px;background:var(--line);border-radius:999px;overflow:hidden;margin:8px 0 4px}
+#storage-fill{height:100%;width:0;background:var(--peat-500);transition:width .3s}
+
+/* fire list */
+.fire-list,.point-list{list-style:none;padding:0;margin:12px 0 0;display:flex;flex-direction:column;gap:10px}
+.fire-card{background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:12px 14px}
+.fire-card[data-state="ready"]{border-color:var(--peat-500);border-left-width:6px}
+.fire-card[data-state="stale"]{border-color:var(--ember-lt);border-left-width:6px}
+.fire-card__top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.fire-card__name{font-weight:700;margin:0 0 2px}
+.fire-card__meta{font-size:13px;color:var(--muted)}
+.fire-card__actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.progress{height:6px;background:var(--line);border-radius:999px;overflow:hidden;margin-top:10px}
+.progress>div{height:100%;width:0;background:var(--ember);transition:width .2s}
+.badge{font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.3px;white-space:nowrap}
+.badge--ready{background:#E3EFE6;color:var(--ok)} .badge--none{background:#EFEAE1;color:var(--muted)}
+.badge--stale{background:#FDF0D9;color:#8A5A00} .badge--pending{background:#FDE6DC;color:var(--ember)}
+
+/* point list */
+.point-card{background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;
+  display:flex;gap:12px;align-items:center}
+.point-card img{width:56px;height:56px;object-fit:cover;border-radius:8px;flex:none;background:var(--line)}
+.point-card__main{flex:1;min-width:0}
+.point-card__depth{font-size:19px;font-weight:700}
+
+/* review queue (admins) */
+.review-card{display:grid;grid-template-columns:118px 1fr;gap:12px;background:var(--card);
+  border:1.5px solid var(--line);border-radius:12px;padding:12px;margin-top:10px;
+  transition:opacity .3s, transform .3s}
+.review-card.is-approved{opacity:0;transform:translateX(30px)}
+.review-card.is-rejected{opacity:0;transform:translateX(-30px)}
+.review-card__photo img{width:118px;height:118px;object-fit:cover;border-radius:8px;display:block}
+.review-card__photo .more{display:flex;gap:4px;margin-top:4px}
+.review-card__photo .more img{width:36px;height:36px;border-radius:6px}
+.review-card__nophoto{width:118px;height:118px;border-radius:8px;background:var(--line);
+  color:var(--muted);font-size:11px;display:flex;align-items:center;text-align:center;padding:8px}
+.review-card__body{min-width:0}
+.review-card__actions{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+
+/* record sheet */
+.sheet{border:0;padding:0;width:min(560px,100%);max-height:92dvh;border-radius:16px 16px 0 0;
+  margin:auto auto 0;background:var(--paper);color:var(--ink)}
+.sheet::backdrop{background:rgba(0,0,0,.5)}
+.sheet form{display:flex;flex-direction:column;max-height:92dvh}
+.sheet__head{display:flex;align-items:center;justify-content:space-between;padding:8px 8px 8px 18px;
+  border-bottom:1px solid var(--line);flex:none}
+.sheet__head h2{margin:0;font-size:18px}
+.sheet__body{padding:4px 18px 18px;overflow-y:auto;flex:1}
+.sheet__foot{display:flex;gap:10px;padding:12px 18px calc(12px + var(--safe-b));border-top:1px solid var(--line);flex:none;background:var(--card)}
+.sheet__foot .btn{flex:1}
+.loc-box{background:var(--card);border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;margin:14px 0}
+.loc-box .row .btn{margin-top:0}
+.depths{border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;margin:14px 0;background:var(--card)}
+.depths legend{font-weight:700;padding:0 6px;font-size:15px}
+.depth-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin:10px 0}
+.depth-grid label{display:flex;flex-direction:column;align-items:center;font-size:12px;font-weight:700;color:var(--muted);gap:4px}
+.depth-grid input{text-align:center;padding:10px 4px}
+.mean-box{font-size:15px;padding-top:6px;border-top:1px dashed var(--line)}
+.photo-previews{display:flex;gap:10px;flex-wrap:wrap;margin:12px 0}
+.photo-previews .ph{position:relative}
+.photo-previews img{width:84px;height:84px;object-fit:cover;border-radius:10px;border:1.5px solid var(--line);display:block}
+.photo-previews .ph button{position:absolute;top:-8px;right:-8px;width:26px;height:26px;border-radius:50%;
+  border:0;background:var(--bad);color:#fff;font:700 13px/26px inherit;cursor:pointer;padding:0}
+.form-error{background:#FDE6DC;color:var(--bad);border-radius:10px;padding:10px 12px;font-size:14px;font-weight:600}
+.accuracy-warn{color:var(--ember);font-weight:700}
+
+/* tab bar */
+.tabbar{display:flex;background:var(--card);border-top:1px solid var(--line);flex:none;
+  padding-bottom:var(--safe-b)}
+.tab{flex:1;border:0;background:none;padding:8px 4px 6px;font-size:11px;font-weight:600;
+  color:var(--muted);cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;min-height:var(--tap)}
+.tab span{font-size:20px;line-height:1}
+.tab.is-active{color:var(--ember)}
+/* .tab's display:flex silently overrides the UA's [hidden]{display:none} -
+   author styles beat user-agent styles - which made the admin-only Review
+   tab visible to every user. Attribute must win explicitly. */
+.tab[hidden]{display:none}
+
+/* AR overlay (Android WebXR): hint + exit over the camera view */
+.ar-overlay{position:fixed;inset:0;z-index:20000;pointer-events:none;
+  display:flex;flex-direction:column;justify-content:space-between;align-items:center;
+  padding:calc(14px + env(safe-area-inset-top,0px)) 16px calc(26px + var(--safe-b))}
+.ar-overlay__hint{pointer-events:none;background:rgba(31,23,18,.82);color:#F6F1E8;
+  border-radius:12px;padding:10px 14px;font-size:14px;font-weight:600;max-width:340px;
+  text-align:center;margin:0}
+.ar-overlay__close{pointer-events:auto;border:0;border-radius:999px;background:var(--ember);
+  color:#fff;font:700 16px/1 inherit;padding:14px 34px;min-height:var(--tap);cursor:pointer;
+  box-shadow:0 3px 14px rgba(0,0,0,.4)}
+
+/* toast */
+.toast{position:fixed;left:50%;bottom:calc(76px + var(--safe-b));transform:translateX(-50%);z-index:9999;
+  background:var(--peat-900);color:#fff;padding:12px 18px;border-radius:10px;font-size:14px;font-weight:600;
+  max-width:88%;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.35)}
+
+/* info prose */
+.prose h2{margin-top:0}
+.prose h3{margin:1.6em 0 .4em;font-size:17px}
+.prose p,.prose li{font-size:15px}
+.prose ul,.prose ol{padding-left:22px}
+.prose li{margin:.4em 0}
+.callout{background:#FDF0D9;border-left:5px solid var(--ember-lt);padding:12px 14px;border-radius:0 10px 10px 0;margin:16px 0}
+.callout--danger{background:#FDE6DC;border-left-color:var(--ember)}
+.callout p{margin:.3em 0}
+
+/* ── land cover x severity chart ──
+   Stacked bars in plain HTML: rows are flex, segments are flex-grow by value.
+   2px surface-coloured gaps between segments keep adjacent fills readable. */
+.chart{position:relative}
+.chart__head h3{margin:0 0 2px;font-size:17px;line-height:1.25}
+.chart__when{margin:0 0 3px;font-size:12.5px;font-weight:600;color:var(--ember)}
+.chart__sub{margin:0 0 14px;font-size:13px;color:var(--muted)}
+.chart__rows{display:flex;flex-direction:column;gap:9px}
+.chart__row{display:grid;grid-template-columns:104px 1fr 62px;align-items:center;gap:8px}
+.chart__label{font-size:12px;line-height:1.25;text-align:right;color:var(--ink);
+  overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.chart__track{background:transparent}
+.chart__bar{display:flex;height:20px;border-radius:4px;overflow:hidden;gap:2px;min-width:3px}
+.chart__seg{display:block;min-width:2px;cursor:default}
+.chart__seg:first-child{border-radius:4px 0 0 4px}
+.chart__seg:last-child{border-radius:0 4px 4px 0}
+.chart__seg:focus-visible{outline:2px solid var(--ink);outline-offset:1px}
+.chart__value{font-size:12px;font-weight:700;color:var(--ink);text-align:right;font-variant-numeric:tabular-nums}
+.chart__legend{display:flex;flex-wrap:wrap;gap:6px 12px;margin:16px 0 0;font-size:11.5px;color:var(--muted)}
+.chart__key{display:inline-flex;align-items:center;gap:5px}
+.chart__key i{width:11px;height:11px;border-radius:3px;border:1px solid rgba(0,0,0,.22)}
+.chart__note{margin:12px 0 0;font-size:11px;line-height:1.45;color:var(--muted)}
+.chart__table{margin-top:12px;font-size:12px}
+.chart__table summary{cursor:pointer;font-weight:600;color:var(--muted);min-height:32px;
+  display:flex;align-items:center}
+.chart__tablewrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.chart__table table{border-collapse:collapse;width:100%;min-width:460px}
+.chart__table th,.chart__table td{padding:5px 7px;border-bottom:1px solid var(--line);
+  text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+.chart__table thead th{font-size:11px;color:var(--muted);font-weight:600}
+.chart__table tbody th{text-align:left;font-weight:600}
+.chart__tip{position:absolute;z-index:20;pointer-events:none;max-width:180px;
+  background:var(--peat-900);color:#fff;font-size:11.5px;line-height:1.35;
+  padding:6px 9px;border-radius:7px;box-shadow:0 3px 10px rgba(0,0,0,.32)}
+.chart__empty{color:var(--muted);font-size:14px}
+
+/* size filter: one small chip in the top row; options unfold only while
+   choosing, then it collapses again */
+.area-filter{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.area-filter__chip{border:0;background:var(--card);color:var(--ink);border-radius:10px;
+  font:600 12.5px/1 inherit;padding:0 11px;min-height:34px;cursor:pointer;
+  box-shadow:0 2px 10px rgba(0,0,0,.28);white-space:nowrap}
+.area-filter__chip.is-filtering{background:var(--peat-800);color:#F6F1E8}
+.area-filter__opts{display:none;flex-direction:column;gap:4px;background:var(--card);
+  border-radius:10px;padding:6px;box-shadow:0 2px 10px rgba(0,0,0,.28)}
+.area-filter.is-open .area-filter__opts{display:flex}
+.area-filter__opts button{border:1.5px solid var(--line);background:var(--card);color:var(--ink);
+  border-radius:8px;font:600 12px/1 inherit;padding:0 10px;min-height:32px;cursor:pointer;text-align:left}
+.area-filter__opts button.is-on{background:var(--peat-800);border-color:var(--peat-800);color:#F6F1E8}
+
+/* map legend: collapsed to a chip by default so it never eats the map on a
+   phone, expandable to the full class list */
+.map-legend{background:var(--card);border-radius:10px;box-shadow:0 2px 10px rgba(0,0,0,.28);
+  overflow:hidden;max-width:220px;font-size:12px}
+.map-legend[hidden]{display:none}
+.map-legend__toggle{display:block;width:100%;border:0;background:var(--peat-800);color:#F6F1E8;
+  font:600 12px/1 inherit;padding:9px 12px;cursor:pointer;text-align:left;min-height:34px}
+.map-legend__toggle::after{content:"▸";float:right;transition:transform .15s}
+.map-legend.is-open .map-legend__toggle::after{transform:rotate(90deg)}
+.map-legend__body{display:none;padding:8px 10px 10px;max-height:52vh;overflow-y:auto}
+.map-legend.is-open .map-legend__body{display:block}
+.map-legend__section + .map-legend__section{margin-top:10px;padding-top:8px;border-top:1px solid var(--line)}
+.map-legend__section h4{margin:0 0 5px;font-size:12px;font-weight:700}
+.map-legend__row{display:flex;align-items:center;gap:6px;line-height:1.5}
+.map-legend__row i{width:13px;height:13px;border-radius:3px;flex:none;
+  border:1px solid rgba(0,0,0,.28);display:inline-block}
+.map-legend__note{margin:6px 0 0;font-size:10.5px;line-height:1.35;color:var(--muted)}
+
+/* leaflet tweaks */
+.leaflet-container{background:#DDD6C8;font-family:inherit}
+/* Attribution must stay clear of the Record button. Capped to the left 58% so
+   it wraps downward rather than stretching under the action buttons. */
+.leaflet-control-attribution{max-width:58%;line-height:1.35;font-size:10px;
+  background:rgba(255,255,255,.82)!important;border-radius:0 6px 0 0;padding:2px 6px!important}
+.fire-popup{font-size:14px;min-width:190px}
+.fire-popup h3{margin:0 0 4px;font-size:15px}
+.fire-popup .btn{margin-top:8px;width:100%}
+.pt-marker{background:var(--ember);border:2.5px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.4)}
+.pt-marker--pending{background:var(--muted)}
+@media (min-width:760px){ .tab{font-size:13px} }
+
+/* Very narrow screens: the action row and the attribution start competing for
+   the same strip, so tighten the row rather than letting them overlap. */
+@media (max-width:340px){
+  .fab--primary{min-width:0;padding:0 14px;font-size:15px}
+  .map-overlay{gap:8px;right:10px}
+  .leaflet-control-attribution{max-width:44%}
+}
+
+/* ── walk-to-node navigation overlay ─────────────────────────────────────── */
+.nav-overlay{position:fixed;inset:0;z-index:2000;display:flex;align-items:center;
+  justify-content:center;background:var(--peat-900);color:#F6F1E8;
+  padding:24px 16px calc(24px + var(--safe-b))}
+.nav-overlay[hidden]{display:none}
+.nav-card{text-align:center;max-width:340px;width:100%}
+.nav-label{font-size:15px;font-weight:700;letter-spacing:.4px;margin:0 0 8px;
+  color:var(--ember-lt)}
+.nav-arrow{display:inline-block;color:var(--ember);
+  transition:transform .25s ease-out;will-change:transform}
+.nav--arrived .nav-arrow{color:var(--ok)}
+.nav-dist{font-size:44px;font-weight:800;margin:10px 0 2px;font-variant-numeric:tabular-nums}
+.nav-sub{margin:0;color:#CBBFA9;font-size:15px}
+.nav-hint{margin:10px 0 0;color:#9C8875;font-size:13px;min-height:2.6em}
+.nav-stop{margin-top:20px;background:rgba(255,255,255,.12);color:#F6F1E8;border:0}
+body.nav-open{overflow:hidden}
+
+/* review: surveyor comment + location-fix offer */
+.review-card__comment{font-size:14px;font-style:italic;color:var(--ink);
+  background:var(--paper);border-left:3px solid var(--line);
+  padding:6px 10px;margin:8px 0 0;border-radius:0 6px 6px 0}
+.review-card__fixloc{margin-top:8px}
+.review-card__fixloc .btn{white-space:normal;text-align:left;line-height:1.35}
