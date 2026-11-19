@@ -166,7 +166,7 @@ async function handleFireSelect(feature) {
 
   const existing = state.packs.get(id);
   if (existing && Packs.packState(existing) === 'ready') {
-    toast('Pack already downloaded — this fire works offline.', 3000);
+    toast('Pack already downloaded — this site works offline.', 3000);
     MapView.zoomToFire(feature);
     return;
   }
@@ -205,7 +205,7 @@ async function downloadFire(feature) {
     MapView.setPackStates(packStateMap());
     toast(
       pack.failed
-        ? `${pack.name}: ${pack.failed} of ${pack.tileCount} tiles missing. Tap Update on this fire to fetch just those.`
+        ? `${pack.name}: ${pack.failed} of ${pack.tileCount} tiles missing. Tap Update on this site to fetch just those.`
         : `${pack.name} ready for offline use (${fmtBytes(pack.bytes)}).`,
       6000
     );
@@ -240,8 +240,8 @@ function updateDlPill() {
 async function deleteFirePack(fireId) {
   const local = state.points.filter(p => p.fireId === fireId && p.status === 'pending');
   if (local.length && !confirm(
-    `${local.length} measurement(s) from this fire have not been synced yet.\n\n` +
-    `Deleting the pack keeps your measurements, but you will lose the offline map. Continue?`
+    `${local.length} record(s) from this site have not been sent in yet.\n\n` +
+    `Deleting the pack keeps your records, but you will lose the offline map. Continue?`
   )) return;
 
   await Packs.removePack(fireId);
@@ -256,7 +256,7 @@ async function deleteFirePack(fireId) {
 function renderFireList() {
   const idx = MapView.getFireIndex();
   const ul = $('#fire-list');
-  if (!idx) { ul.innerHTML = '<li class="muted">Loading fire index…</li>'; return; }
+  if (!idx) { ul.innerHTML = '<li class="muted">Loading sites…</li>'; return; }
 
   let items;
   if (state.listFilter.near && state.gps) {
@@ -275,7 +275,7 @@ function renderFireList() {
   if (state.listFilter.downloadedOnly) items = items.filter(({ f }) => state.packs.has(f.properties.id));
   if (!state.listFilter.near && !q) items = items.slice(0, 60);
 
-  if (!items.length) { ul.innerHTML = '<li class="muted">No fires match.</li>'; return; }
+  if (!items.length) { ul.innerHTML = '<li class="muted">No sites match.</li>'; return; }
 
   ul.innerHTML = '';
   for (const { f, d } of items) {
@@ -401,7 +401,7 @@ async function downloadBackup() {
       .join('\r\n');
     saveBlob(new Blob(['﻿' + csv], { type: 'text/csv' }),
              `peatprobe-backup-${day}.csv`);
-    st.textContent = `Saved ${rows.length} measurement(s) as JSON + CSV.`;
+    st.textContent = `Saved ${rows.length} record(s) as JSON + CSV.`;
   } catch (e) {
     st.textContent = `Backup failed: ${e.message || e}`;
   }
@@ -469,7 +469,7 @@ function beginManualPlacement() {
   showTab('map');
   MapView.setPlacingMode(true);
   const hint = $('#map-hint');
-  hint.textContent = 'Tap the map where you took the measurement';
+  hint.textContent = 'Tap the map where you made the record';
   hint.hidden = false;
 }
 
@@ -502,10 +502,10 @@ function renderDraftLocation() {
   const fire = hit && hit.feature;
   state.draft.fire = fire;
   $('#loc-fire').textContent = !fire
-    ? 'Not near a mapped fire perimeter — that is fine, it will be recorded as unassigned.'
+    ? 'Outside the mapped survey site. That is fine, it will still be saved.'
     : hit.distM === 0
       ? `Inside: ${Packs.fireName(fire.properties)}`
-      : `${Math.round(hit.distM)} m outside ${Packs.fireName(fire.properties)} — still counted as that fire.`;
+      : `${Math.round(hit.distM)} m outside ${Packs.fireName(fire.properties)} — still counted as that site.`;
 
   // Nearest sampling node, so the surveyor sees which grid point this
   // measurement will belong to before saving.
@@ -606,7 +606,7 @@ function renderPhotoPreviews() {
   });
   $('#photo-hint').textContent = state.photos.length
     ? `${state.photos.length} photo(s) added — tap above to add another.`
-    : 'Include a ruler or a familiar object for scale. You can add several — tap again after the first.';
+    : 'Take a clear photo of what you are recording. You can add several — tap again after the first.';
 }
 
 async function resizePhoto(file) {
@@ -754,7 +754,7 @@ function renderPointList() {
   renderCampaigns();
   const ul = $('#point-list');
   if (!state.points.length) {
-    ul.innerHTML = '<li class="muted">No measurements yet. Open the map and tap <strong>+ Record</strong>.</li>';
+    ul.innerHTML = '<li class="muted">No records yet. Open the map and tap <strong>+ Record</strong>.</li>';
     return;
   }
   ul.innerHTML = '';
@@ -773,12 +773,12 @@ function renderPointList() {
         ${(p.photoCount || 0) > 1 ? `<div class="muted small">${p.photoCount} photos</div>` : ''}
       </div>
       <span class="badge badge--${p.status === 'pending' ? 'pending' : 'ready'}">${p.status === 'pending' ? 'Unsynced' : 'Synced'}</span>
-      ${p.status === 'pending' ? '<button class="icon-btn" data-del aria-label="Delete this unsynced measurement">🗑</button>' : ''}
+      ${p.status === 'pending' ? '<button class="icon-btn" data-del aria-label="Delete this unsent record">🗑</button>' : ''}
     `;
     const del = li.querySelector('[data-del]');
     if (del) del.addEventListener('click', async (e) => {
       e.stopPropagation();
-      if (!confirm('Delete this unsynced measurement and its photos? This cannot be undone.')) return;
+      if (!confirm('Delete this unsent record and its photos? This cannot be undone.')) return;
       for (let k = 0; k < (p.photoCount || 1); k++) await DB.deletePhoto(`${p.uuid}:${k}`).catch(() => {});
       await DB.deletePhoto(p.uuid).catch(() => {});
       await DB.deletePoint(p.uuid);
@@ -866,10 +866,10 @@ function updateSyncPill() {
   const note = $('#sync-note');
   if (!Sync.isEnabled()) {
     note.innerHTML = n
-      ? `<strong>${n} measurement(s) held on this device.</strong> Cloud sync is off, so export a CSV before uninstalling or clearing your browser.`
+      ? `<strong>${n} record(s) held on this device.</strong> Cloud sync is off, so export a CSV before uninstalling or clearing your browser.`
       : 'Cloud sync is off. Measurements stay on this device — export a CSV to get them out.';
   } else {
-    note.textContent = n ? `${n} measurement(s) waiting to upload.` : 'Everything is synced.';
+    note.textContent = n ? `${n} record(s) waiting to be sent in.` : 'Everything is synced.';
   }
 }
 
@@ -917,7 +917,7 @@ async function doSync(opts = {}) {
     if (!opts.quiet || pushed || failed) {
       toast(failed
         ? `Uploaded ${pushed}, ${failed} failed: ${firstError || 'unknown error'}`
-        : `Synced ${pushed} measurement(s).`, failed ? 9000 : 3200);
+        : `Sent in ${pushed} record(s).`, failed ? 9000 : 3200);
     }
   } catch (e) {
     if (!opts.quiet) toast(`Sync failed: ${e.message}`, 5000);

@@ -136,8 +136,8 @@ export async function initMap(opts) {
   gridGroup = L.layerGroup().addTo(map);  // on by default: it is the fieldwork
 
   const overlays = {
-    'Fire perimeters': firePolys,
-    'Measurements': pointsLayer,
+    'Survey site': firePolys,
+    'Records': pointsLayer,
     'Sampling grid (100 m)': gridGroup,
     'Burn severity (dNBR)': dnbrGroup,
   };

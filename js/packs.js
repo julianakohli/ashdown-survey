@@ -136,7 +136,7 @@ export async function downloadPack(feature, onProgress, signal) {
   const fireId = feature.properties.id;
   const est = estimatePack(feature);
   if (est.tooBig) {
-    throw new Error(`That fire needs ${est.count} tiles, over the ${PACK.maxTiles} limit. Reduce maxZoom in config.js if you really need it.`);
+    throw new Error(`That site needs ${est.count} tiles, over the ${PACK.maxTiles} limit. Reduce maxZoom in config.js if you really need it.`);
   }
 
   await DB.requestPersistence();
@@ -268,7 +268,7 @@ export function fireName(props) {
   const parts = [props.COMMUNE, props.PROVINCE].filter(
     v => v && String(v).trim() && String(v).trim() !== '0'
   );
-  const place = parts.length ? [...new Set(parts)].join(', ') : 'Unnamed fire';
+  const place = parts.length ? [...new Set(parts)].join(', ') : 'Survey site';
   return place;
 }
 

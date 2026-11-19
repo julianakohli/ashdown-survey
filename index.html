@@ -46,15 +46,15 @@
   <section id="view-fires" class="view">
     <div class="pane">
       <h2>Field packs</h2>
-      <p class="muted">Download a fire before you head out. Packs work with no signal.</p>
+      <p class="muted">Download the site map before you head out (on wifi). It then works with no signal.</p>
       <div class="storage-bar"><div id="storage-fill"></div></div>
       <p class="muted small" id="storage-text">Calculating storage…</p>
       <label class="field">
-        <span>Find a fire</span>
-        <input type="search" id="fire-search" placeholder="Place, council area or fire ID">
+        <span>Find a site</span>
+        <input type="search" id="fire-search" placeholder="Site name">
       </label>
       <div class="row">
-        <button id="btn-near-me" class="btn btn--sm">Fires near me</button>
+        <button id="btn-near-me" class="btn btn--sm">Sites near me</button>
         <button id="btn-show-downloaded" class="btn btn--sm">Downloaded only</button>
       </div>
       <ul id="fire-list" class="fire-list"></ul>
@@ -64,7 +64,7 @@
   <!-- ══════════ MY DATA ══════════ -->
   <section id="view-data" class="view">
     <div class="pane">
-      <h2>Measurements &amp; sync</h2>
+      <h2>My records</h2>
       <div class="row">
         <button id="btn-sync" class="btn btn--primary">Sync now</button>
         <button id="btn-export" class="btn">Export CSV</button>
@@ -76,7 +76,7 @@
         <p class="muted small">Everyone's sampling, newest first — tap to fly there.</p>
         <ul id="campaign-list" class="fire-list"></ul>
       </div>
-      <h2 style="margin-top:22px">All measurements</h2>
+      <h2 style="margin-top:22px">All records</h2>
       <ul id="point-list" class="point-list"></ul>
     </div>
   </section>
@@ -144,7 +144,7 @@
           <label>4<input type="number" step="0.5" min="0" max="500" inputmode="decimal" data-depth></label>
           <label>5<input type="number" step="0.5" min="0" max="500" inputmode="decimal" data-depth></label>
         </div>
-        <div class="mean-box">Mean: <strong id="depth-mean">—</strong> <span id="depth-spread" class="muted small"></span></div>
+        <div class="mean-box">Average: <strong id="depth-mean">—</strong> <span id="depth-spread" class="muted small"></span></div>
       </fieldset>
 
       <label class="field">
@@ -191,7 +191,7 @@
 <!-- ══════════ FIRE DETAIL / CHARTS ══════════ -->
 <dialog id="fire-dialog" class="sheet">
   <div class="sheet__head">
-    <h2>Fire details</h2>
+    <h2>Site details</h2>
     <button type="button" id="fire-close" class="icon-btn" aria-label="Close">✕</button>
   </div>
   <div class="sheet__body" id="fire-detail"></div>
