@@ -120,11 +120,24 @@ export async function webxrStart(onEnd) {
 
   overlay.querySelector('.ar-overlay__close').addEventListener('click', () => session.end());
   session.addEventListener('end', cleanup);
-  await renderer.xr.setSession(session);
 
-  const viewerSpace = await session.requestReferenceSpace('viewer');
-  const localSpace = await session.requestReferenceSpace('local');
-  const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+  let viewerSpace, localSpace, hitTestSource;
+  try {
+    // three.js defaults to 'local-floor', which Chrome refuses unless it was
+    // requested as a session feature. The refusal used to leave the session
+    // open with nothing rendering: a black screen. 'local' is always granted
+    // for immersive sessions and is what the hit test below uses anyway.
+    renderer.xr.setReferenceSpaceType('local');
+    await renderer.xr.setSession(session);
+
+    viewerSpace = await session.requestReferenceSpace('viewer');
+    localSpace = await session.requestReferenceSpace('local');
+    hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+  } catch (err) {
+    // Never leave the user stuck in a blank camera view.
+    try { await session.end(); } catch {}
+    throw err;
+  }
 
   session.addEventListener('select', () => {
     if (!reticle.visible) return;
