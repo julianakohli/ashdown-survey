@@ -30,7 +30,7 @@ and why it matters. ]]</p>
 
 <h3>Making a record</h3>
 <ol>
-  <li>Tap the green <strong>+ Record</strong> button on the map.</li>
+  <li>Tap the orange <strong>+ Record</strong> button on the map.</li>
   <li>Wait a moment while the phone finds where you are.</li>
   <li>Answer the questions. Anything marked <em>required</em> must be filled in.</li>
   <li>Take a photo.</li>
