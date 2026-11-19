@@ -43,7 +43,7 @@ export const BASEMAPS = {
     label: 'MapTiler Topo',
     // TODO(template): create a free account at maptiler.com, make a key, and
     // paste it here. Then set its origin whitelist (see SECURITY note above).
-    url: 'https://api.maptiler.com/maps/topo-v4/{z}/{x}/{y}.webp?key=YOUR_MAPTILER_KEY',
+    url: 'https://api.maptiler.com/maps/topo-v4/{z}/{x}/{y}.webp?key=VCMzY0PxK66MVcmnomDU',
     attribution: '&copy; <a href="https://www.maptiler.com/copyright/">MapTiler</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     maxZoom: 20,
   },
