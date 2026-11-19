@@ -1,7 +1,7 @@
 {
-  "name": "PeatProbe — peat burn depth survey",
-  "short_name": "PeatProbe",
-  "description": "Record peat burn depth after UK wildfires. Works offline.",
+  "name": "Ashdown Survey",
+  "short_name": "Ashdown",
+  "description": "Citizen science survey. Works offline.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

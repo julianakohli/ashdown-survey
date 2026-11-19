@@ -32,7 +32,7 @@ service cloud.firestore {
         // Free text is capped; the controlled vocabulary is enforced.
         && (d.gridId == null || (d.gridId is string && d.gridId.size() < 40))
         && (d.combustion == null ||
-            d.combustion in ['unburned','light','moderate','near_complete'])
+            d.combustion in ['option_a','option_b','option_c','option_d']   // EDIT ME: keep in sync with js/app.js)
         && d.status == 'pending_review';                           // only an admin may verify
     }
 

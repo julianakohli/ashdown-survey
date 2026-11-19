@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1">
-<title>PeatProbe — peat burn depth survey</title>
-<meta name="description" content="Citizen science app for recording peat burn depth after wildfires in the UK.">
+<title>Ashdown Survey</title>
+<meta name="description" content="Citizen science survey app. Works offline.">
 <meta name="theme-color" content="#2C221A">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/logo.svg" type="image/svg+xml">
@@ -20,7 +20,7 @@
 
 <header class="topbar">
   <img src="icons/logo.svg" alt="" class="topbar__logo" width="32" height="32">
-  <h1 class="topbar__title">PeatProbe</h1>
+  <h1 class="topbar__title">Ashdown Survey</h1>
   <div class="topbar__status">
     <span id="net-pill" class="pill" data-state="online">online</span>
     <button id="sync-pill" class="pill pill--btn" hidden></button>
@@ -33,7 +33,7 @@
     <div id="map"></div>
     <div class="map-overlay">
       <button id="btn-locate" class="fab fab--ghost" title="Centre on my location" aria-label="Centre on my location">◎</button>
-      <button id="btn-add" class="fab fab--primary" title="Record a measurement">+ Record</button>
+      <button id="btn-add" class="fab fab--primary" title="Make a new record">+ Record</button>
     </div>
     <div id="map-hint" class="map-hint" hidden></div>
     <div id="dl-pill" class="dl-pill" hidden>
@@ -115,7 +115,7 @@
 <dialog id="point-dialog" class="sheet">
   <form id="point-form" method="dialog">
     <header class="sheet__head">
-      <h2>Record measurement</h2>
+      <h2>New record</h2>
       <button type="button" id="form-close" class="icon-btn" aria-label="Close">✕</button>
     </header>
 
@@ -134,8 +134,9 @@
       </div>
 
       <fieldset class="depths">
-        <legend>Burn depth readings (cm) <span class="req">required</span></legend>
-        <p class="muted small">Enter up to five readings around the point. At least one is required.</p>
+        <!-- EDIT ME: Example question 1 (numbers). Change the wording below. -->
+        <legend>Example question 1 (numbers) <span class="req">required</span></legend>
+        <p class="muted small">Enter up to five numbers. At least one is required. The app works out the average.</p>
         <div class="depth-grid">
           <label>1<input type="number" step="0.5" min="0" max="500" inputmode="decimal" data-depth></label>
           <label>2<input type="number" step="0.5" min="0" max="500" inputmode="decimal" data-depth></label>
@@ -147,28 +148,29 @@
       </fieldset>
 
       <label class="field">
-        <span>Completeness of vegetation combustion <span class="req">required</span></span>
+        <!-- EDIT ME: Example question 2 (pick from a list). Change the wording and the answers below. -->
+        <span>Example question 2 (pick one) <span class="req">required</span></span>
         <select id="combustion-input">
           <option value="">Choose one…</option>
-          <option value="unburned">Unburned</option>
-          <option value="light">Lightly burned</option>
-          <option value="moderate">Moderately burned</option>
-          <option value="near_complete">(Near) complete</option>
+          <option value="option_a">Answer A</option>
+          <option value="option_b">Answer B</option>
+          <option value="option_c">Answer C</option>
+          <option value="option_d">Answer D</option>
         </select>
-        <span class="muted small">How much of the above-ground vegetation was consumed.</span>
+        <span class="muted small">Help text for example question 2.</span>
       </label>
 
       <label class="field">
         <span>Photos <span class="req">at least one</span></span>
         <input type="file" id="photo-input" accept="image/*" capture="environment">
-        <span class="muted small" id="photo-hint">Include a ruler or a familiar object for scale.
+        <span class="muted small" id="photo-hint">Take a clear photo of what you are recording.
         You can add several — tap again after the first.</span>
       </label>
       <div id="photo-previews" class="photo-previews"></div>
 
       <label class="field">
         <span>Notes</span>
-        <textarea id="comment-input" rows="3" maxlength="500" placeholder="Vegetation, ash depth, anything unusual…"></textarea>
+        <textarea id="comment-input" rows="3" maxlength="500" placeholder="Anything else you noticed…"></textarea>
       </label>
 
       <label class="field">
@@ -181,7 +183,7 @@
 
     <footer class="sheet__foot">
       <button type="button" id="form-cancel" class="btn">Cancel</button>
-      <button type="button" id="form-save" class="btn btn--primary">Save measurement</button>
+      <button type="button" id="form-save" class="btn btn--primary">Save record</button>
     </footer>
   </form>
 </dialog>

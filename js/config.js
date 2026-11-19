@@ -2,7 +2,7 @@
 // Everything you are likely to change lives in this file.
 
 export const APP = {
-  name: 'PeatProbe',
+  name: 'Ashdown Survey',
   // Bump when the pack format changes so downloaded packs are flagged stale.
   // v2: tile cache keys namespaced by layer; packs may carry CORINE.
   // v3: packs carry the dNBR overlay and the land cover x severity stats.

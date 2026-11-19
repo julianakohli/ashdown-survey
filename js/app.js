@@ -18,11 +18,13 @@ import * as Review from './review.js';
 // this distance of it (half the 100 m spacing, with a little GPS slack).
 const GRID_ATTACH_M = 60;
 
+// EDIT ME: answers for Example question 2. Must match the <option>s in
+// index.html AND the list in firestore.rules.
 const COMBUSTION = {
-  unburned: 'Unburned',
-  light: 'Lightly burned',
-  moderate: 'Moderately burned',
-  near_complete: '(Near) complete',
+  option_a: 'Answer A',
+  option_b: 'Answer B',
+  option_c: 'Answer C',
+  option_d: 'Answer D',
 };
 
 const $ = (s) => document.querySelector(s);
@@ -94,7 +96,7 @@ async function boot() {
   if (await DB.getMeta('askedPersist') !== true) {
     const ok = await DB.requestPersistence();
     await DB.setMeta('askedPersist', true);
-    if (!ok) toast('Tip: add PeatProbe to your home screen so your data is not cleared.', 6000);
+    if (!ok) toast('Tip: add this app to your home screen so your data is not cleared.', 6000);
   }
 
   const surveyor = await DB.getMeta('surveyor');
@@ -570,9 +572,9 @@ function updateMean() {
   const vals = readDepths().filter(v => v != null);
   if (!vals.length) { $('#depth-mean').textContent = '—'; $('#depth-spread').textContent = ''; return; }
   const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
-  $('#depth-mean').textContent = `${mean.toFixed(1)} cm`;
+  $('#depth-mean').textContent = `${mean.toFixed(1)}`;
   $('#depth-spread').textContent = vals.length > 1
-    ? `(${vals.length} readings, range ${Math.min(...vals)}–${Math.max(...vals)} cm)`
+    ? `(${vals.length} readings, range ${Math.min(...vals)}–${Math.max(...vals)})`
     : '(1 reading)';
 }
 
@@ -626,16 +628,16 @@ async function savePoint() {
   const depths = readDepths();
   const vals = depths.filter(v => v != null);
 
-  if (!vals.length) return showErr(err, 'Enter at least one burn depth reading.');
+  if (!vals.length) return showErr(err, 'Please answer example question 1 (enter at least one number).');
   if (vals.some(v => v < 0 || v > QUALITY.maxDepthCm)) {
-    return showErr(err, `Readings must be between 0 and ${QUALITY.maxDepthCm} cm.`);
+    return showErr(err, `Numbers for example question 1 must be between 0 and ${QUALITY.maxDepthCm}.`);
   }
   const combustion = $('#combustion-input').value;
   // Required like the photo: it is one tap, and without it a depth reading
   // cannot be interpreted against how much fuel actually burned. Delete these
   // two lines to make it optional.
-  if (!combustion) return showErr(err, 'Choose how completely the vegetation burned.');
-  if (!state.photos.length) return showErr(err, 'At least one photo is required. It is how we check readings later.');
+  if (!combustion) return showErr(err, 'Please choose an answer for example question 2.');
+  if (!state.photos.length) return showErr(err, 'Please add at least one photo.');
   if (!state.draft) return showErr(err, 'No location set.');
   // Mirror the server rules' UK bounding box here, so a mis-tapped test point
   // fails NOW with a real explanation instead of a cryptic permission error
@@ -763,7 +765,7 @@ function renderPointList() {
     li.innerHTML = `
       ${img ? `<img src="${img}" alt="">` : '<div style="width:56px;height:56px;border-radius:8px;background:var(--line)"></div>'}
       <div class="point-card__main">
-        <div class="point-card__depth">${p.depthMean != null ? p.depthMean.toFixed(1) : '?'} cm</div>
+        <div class="point-card__depth">${p.depthMean != null ? p.depthMean.toFixed(1) : '?'}</div>
         <div class="muted small">${esc(p.fireName || 'Unassigned')} · ${new Date(p.createdAt).toLocaleDateString('en-GB')}</div>
         <div class="muted small">${p.depths.filter(d => d != null).length} reading(s)${p.accuracyM != null ? ` · ±${Math.round(p.accuracyM)} m` : ''}</div>
         ${p.combustion ? `<div class="muted small">${esc(COMBUSTION[p.combustion] || p.combustion)}</div>` : ''}
@@ -928,8 +930,8 @@ async function doSync(opts = {}) {
 function exportCsv() {
   if (!state.points.length) { toast('Nothing to export yet.'); return; }
   const cols = ['uuid', 'created_iso', 'surveyor', 'fire_id', 'fire_name', 'lat', 'lon',
-    'gps_accuracy_m', 'manual_placement', 'depth_1', 'depth_2', 'depth_3', 'depth_4', 'depth_5',
-    'depth_mean_cm', 'depth_n', 'combustion', 'grid_id', 'grid_dist_m', 'comment', 'photo_url', 'photo_count', 'status'];
+    'gps_accuracy_m', 'manual_placement', 'q1_number_1', 'q1_number_2', 'q1_number_3', 'q1_number_4', 'q1_number_5',
+    'q1_average', 'q1_count', 'q2_answer', 'grid_id', 'grid_dist_m', 'comment', 'photo_url', 'photo_count', 'status'];
   const q = (v) => {
     if (v == null) return '';
     const s = String(v);
